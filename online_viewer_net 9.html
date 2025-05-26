@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vier gewinnt</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+    <style>
+        /* Custom styles for the game */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8; /* Light blue-gray background */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 1rem;
+            box-sizing: border-box;
+        }
+
+        .game-board {
+            display: grid;
+            grid-template-rows: repeat(6, 1fr); /* 6 rows */
+            grid-template-columns: repeat(7, 1fr); /* 7 columns */
+            gap: 0.5rem; /* Gap between cells */
+            background-color: #4a90e2; /* Connect Four board blue */
+            padding: 1rem;
+            border-radius: 1.5rem; /* More rounded corners */
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2); /* Deeper shadow */
+            max-width: 90vw; /* Max width relative to viewport */
+            aspect-ratio: 7 / 6; /* Maintain aspect ratio for the board */
+            width: 100%; /* Ensure it takes full width of its container */
+        }
+
+        .cell {
+            width: 100%;
+            height: 0;
+            padding-bottom: 100%; /* Makes the cell square */
+            background-color: #d0e6f7; /* Light background for empty cells */
+            border-radius: 50%; /* Circular holes */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative; /* For disc animation */
+            overflow: hidden; /* Hide overflow during disc animation */
+            box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.1); /* Inner shadow for depth */
+        }
+
+        .disc {
+            position: absolute;
+            width: 90%; /* Disc slightly smaller than cell */
+            height: 90%;
+            border-radius: 50%;
+            transition: transform 0.5s ease-out, background-color 0.3s ease-in-out; /* Smooth drop and color change */
+            top: 50%; /* Position for perfect centering */
+            left: 50%; /* Position for perfect centering */
+            transform: translate(-50%, -150%); /* Start above the cell, adjusted for centering */
+        }
+
+        .disc.player1 {
+            background-color: #e74c3c; /* Red disc */
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .disc.player2 {
+            background-color: #f1c40f; /* Yellow disc */
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .disc.dropped {
+            transform: translate(-50%, -50%); /* Drop into centered position */
+        }
+
+        .column-drop-area {
+            grid-row: 1 / span 6; /* Spans all rows */
+            background-color: transparent;
+            cursor: pointer;
+            z-index: 10; /* Above the cells */
+            position: relative;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .game-board {
+                gap: 0.3rem;
+                padding: 0.75rem;
+                border-radius: 1rem;
+            }
+            .cell {
+                border-radius: 50%;
+            }
+            .disc {
+                width: 85%;
+                height: 85%;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .game-board {
+                gap: 0.2rem;
+                padding: 0.5rem;
+                border-radius: 0.75rem;
+            }
+            .disc {
+                width: 80%;
+                height: 80%;
+            }
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-blue-100 to-indigo-200 p-4">
+
+    <div class="bg-white p-8 rounded-3xl shadow-xl flex flex-col items-center space-y-6 w-full max-w-md">
+        <h1 class="text-5xl font-extrabold text-gray-800 mb-4 text-center">Vier gewinnt</h1>
+        <div id="game-message" class="text-2xl font-semibold text-gray-700 text-center">Spieler 1 ist dran (Rot)</div>
+
+        <div id="game-container" class="relative w-full aspect-w-7 aspect-h-6">
+            <div id="game-board" class="game-board w-full h-full">
+                </div>
+            <div id="column-drop-areas" class="absolute top-0 left-0 w-full h-full grid grid-cols-7 gap-2 p-4 box-border">
+                </div>
+        </div>
+
+        <button id="reset-button" class="mt-8 px-8 py-4 bg-gradient-to-r from-green-500 to-teal-600 text-white font-bold text-xl rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition duration-300 ease-in-out focus:outline-none focus:ring-4 focus:ring-green-300">
+            Neues Spiel
+        </button>
+    </div>
+
+    <script>
+        // Game constants
+        const ROWS = 6;
+        const COLS = 7;
+        const PLAYER_1 = 1; // Red
+        const PLAYER_2 = 2; // Yellow
+
+        // Game state variables
+        let board = [];
+        let currentPlayer = PLAYER_1;
+        let gameOver = false;
+
+        // DOM elements
+        const gameBoardElement = document.getElementById('game-board');
+        const gameMessageElement = document.getElementById('game-message');
+        const resetButton = document.getElementById('reset-button');
+        const columnDropAreasElement = document.getElementById('column-drop-areas');
+
+        /**
+         * Initializes the game board and sets up event listeners.
+         */
+        function initializeGame() {
+            // Reset game state
+            board = Array(ROWS).fill(0).map(() => Array(COLS).fill(0));
+            currentPlayer = PLAYER_1;
+            gameOver = false;
+            gameBoardElement.innerHTML = ''; // Clear previous board
+            columnDropAreasElement.innerHTML = ''; // Clear previous drop areas
+
+            // Create board cells
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell');
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
+                    gameBoardElement.appendChild(cell);
+                }
+            }
+
+            // Create column drop areas
+            for (let c = 0; c < COLS; c++) {
+                const dropArea = document.createElement('div');
+                dropArea.classList.add('column-drop-area', 'flex', 'justify-center', 'items-start');
+                dropArea.dataset.col = c;
+
+                dropArea.addEventListener('click', () => handleColumnClick(c));
+                columnDropAreasElement.appendChild(dropArea);
+            }
+
+            updateGameMessage();
+        }
+
+        /**
+         * Handles a click on a column to drop a disc.
+         * @param {number} col - The column index where the disc is dropped.
+         */
+        function handleColumnClick(col) {
+            if (gameOver) return;
+
+            // Find the lowest empty row in the clicked column
+            let row = -1;
+            for (let r = ROWS - 1; r >= 0; r--) {
+                if (board[r][col] === 0) {
+                    row = r;
+                    break;
+                }
+            }
+
+            if (row !== -1) {
+                // Update the board state
+                board[row][col] = currentPlayer;
+
+                // Visually add the disc
+                const cellElement = gameBoardElement.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+                const discElement = document.createElement('div');
+                discElement.classList.add('disc', currentPlayer === PLAYER_1 ? 'player1' : 'player2');
+                cellElement.appendChild(discElement);
+
+                // Trigger animation after a small delay to allow DOM update
+                setTimeout(() => {
+                    discElement.classList.add('dropped');
+                }, 50);
+
+
+                // Check for win or draw after animation completes
+                setTimeout(() => {
+                    if (checkWin(row, col, currentPlayer)) {
+                        gameMessageElement.textContent = `Spieler ${currentPlayer === PLAYER_1 ? '1 (Rot)' : '2 (Gelb)'} hat gewonnen!`;
+                        gameOver = true;
+                        disableDropAreas();
+                        // Trigger confetti effect
+                        confetti({
+                            particleCount: 150,
+                            spread: 90,
+                            origin: { y: 0.6 }
+                        });
+                    } else if (checkDraw()) {
+                        gameMessageElement.textContent = 'Unentschieden!';
+                        gameOver = true;
+                        disableDropAreas();
+                    } else {
+                        // Switch to the next player
+                        currentPlayer = currentPlayer === PLAYER_1 ? PLAYER_2 : PLAYER_1;
+                        updateGameMessage();
+                    }
+                }, 500); // Match animation duration
+            } else {
+                // Column is full
+                gameMessageElement.textContent = 'Spalte ist voll! Wähle eine andere Spalte.';
+                setTimeout(() => updateGameMessage(), 1500); // Clear message after a delay
+            }
+        }
+
+        /**
+         * Disables click events on drop areas when the game is over.
+         */
+        function disableDropAreas() {
+            columnDropAreasElement.querySelectorAll('.column-drop-area').forEach(area => {
+                area.style.pointerEvents = 'none';
+            });
+        }
+
+        /**
+         * Re-enables click events on drop areas.
+         */
+        function enableDropAreas() {
+            columnDropAreasElement.querySelectorAll('.column-drop-area').forEach(area => {
+                area.style.pointerEvents = 'auto';
+            });
+        }
+
+        /**
+         * Updates the game message displayed to the user.
+         */
+        function updateGameMessage() {
+            if (!gameOver) {
+                gameMessageElement.textContent = `Spieler ${currentPlayer === PLAYER_1 ? '1 (Rot)' : '2 (Gelb)'} ist dran`;
+            }
+        }
+
+        /**
+         * Checks if the current player has won the game.
+         * @param {number} row - The row of the last dropped disc.
+         * @param {number} col - The column of the last dropped disc.
+         * @param {number} player - The current player (1 or 2).
+         * @returns {boolean} - True if the player has won, false otherwise.
+         */
+        function checkWin(row, col, player) {
+            // Check horizontal
+            let count = 0;
+            for (let c = 0; c < COLS; c++) {
+                if (board[row][c] === player) {
+                    count++;
+                } else {
+                    count = 0;
+                }
+                if (count >= 4) return true;
+            }
+
+            // Check vertical
+            count = 0;
+            for (let r = 0; r < ROWS; r++) {
+                if (board[r][col] === player) { // Corrected: changed 'c' to 'col'
+                    count++;
+                } else {
+                    count = 0;
+                }
+                if (count >= 4) return true;
+            }
+
+            // Check diagonal (top-left to bottom-right)
+            count = 0;
+            let r = row - Math.min(row, col);
+            let c = col - Math.min(row, col);
+            while (r < ROWS && c < COLS) {
+                if (board[r][c] === player) {
+                    count++;
+                } else {
+                    count = 0;
+                }
+                if (count >= 4) return true;
+                r++;
+                c++;
+            }
+
+            // Check diagonal (top-right to bottom-left)
+            count = 0;
+            r = row - Math.min(row, COLS - 1 - col);
+            c = col + Math.min(row, COLS - 1 - col);
+            while (r < ROWS && c >= 0) {
+                if (board[r][c] === player) {
+                    count++;
+                } else {
+                    count = 0;
+                }
+                if (count >= 4) return true;
+                r++;
+                c--;
+            }
+
+            return false;
+        }
+
+        /**
+         * Checks if the game is a draw (board is full).
+         * @returns {boolean} - True if it's a draw, false otherwise.
+         */
+        function checkDraw() {
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (board[r][c] === 0) {
+                        return false; // Found an empty cell, not a draw
+                    }
+                }
+            }
+            return true; // Board is full
+        }
+
+        // Event listener for the reset button
+        resetButton.addEventListener('click', () => {
+            initializeGame();
+            enableDropAreas();
+        });
+
+        // Initialize the game when the page loads
+        window.onload = initializeGame;
+    </script>
+</body>
+</html>
